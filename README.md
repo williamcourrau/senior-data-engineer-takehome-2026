@@ -439,7 +439,7 @@ docker-compose up -d
 1. Open Airflow UI: http://localhost:8080
 2. Login: `airflow` / `airflow`
 3. Look for the search Dags and type 'Fetcher'
-![alt text](./images/airflow_postgree_fetcher.png)
+![alt text](./images/airflow_DAGs_fetcher.png)
 4. Click on fetcher and run in the play button.
 ![alt text](./images/airflow_fetcher_steps.png)
 By the way, should be two steps "Crate Tables" and "Fetch and Store Weather"
