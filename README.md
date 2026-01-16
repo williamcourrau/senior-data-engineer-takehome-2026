@@ -420,7 +420,7 @@ docker-compose up -d
 4. Click **+** to add new variable:
    - **Key:** `OPENWEATHER_API_KEY`
    - **Value:** `your_api_key_here`
-  ![alt text](images\airflow_postgree_connection.png)
+  ![alt text](./images/airflow_postgree_connection.png)
 5. Save
 
 
@@ -429,7 +429,7 @@ docker-compose up -d
 2. Login: `airflow` / `airflow`
 3. Go to **Admin > Connections > Add new connection**
 4. Should look like the following records:
-![alt text](images\airflow_postgree_connection.png)
+![alt text](./images/airflow_postgree_connection.png)
 5. Save
 
 
@@ -439,18 +439,18 @@ docker-compose up -d
 1. Open Airflow UI: http://localhost:8080
 2. Login: `airflow` / `airflow`
 3. Look for the search Dags and type 'Fetcher'
-![alt text](images\airflow_postgree_fetcher.png)
+![alt text](./images/airflow_postgree_fetcher.png)
 4. Click on fetcher and run in the play button.
-![alt text](images\airflow_fetcher_steps.png)
+![alt text](./images/airflow_fetcher_steps.png)
 By the way, should be two steps "Crate Tables" and "Fetch and Store Weather"
 
 **2. Transformer:**
 1. Open Airflow UI: http://localhost:8080
 2. Login: `airflow` / `airflow`
 3. Look for the search Dags and type 'Transformer'
-![alt text](images\airflow_DAGs_transformer.png)
+![alt text](./images/airflow_DAGs_transformer.png)
 4. Click on transformer and run in the play button.
-![alt text](images\airflow_transformer_steps.png)
+![alt text](./images/airflow_transformer_steps.png)
 There are steps: create derived tables, aggregate daily weather. This could be add more aggregate like compute sumaries of weather and run it in parallel.
 ---
 
