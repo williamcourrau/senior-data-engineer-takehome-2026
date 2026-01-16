@@ -379,6 +379,7 @@ With more time, consider the next items:
 
 Project Structure:
 
+```text
 SENIOR-DATA-ENGINEER-TAKEHOME-2026/
 ├── dags/
 │   ├── __pycache__/
@@ -398,7 +399,7 @@ SENIOR-DATA-ENGINEER-TAKEHOME-2026/
 ├── docker-compose.yaml
 ├── LICENSE
 └── README.md
-
+```
 
 ### Step 1: initialize the airflow db
 ```bash
@@ -450,8 +451,7 @@ By the way, should be two steps "Crate Tables" and "Fetch and Store Weather"
 ![alt text](images\airflow_DAGs_transformer.png)
 4. Click on transformer and run in the play button.
 ![alt text](images\airflow_transformer_steps.png)
-There are steps: create derived tables, aggregate daily weather and then execute in parallel aggregate for weakly weather, compute location summary and validate the aggregate data.
-
+There are steps: create derived tables, aggregate daily weather. This could be add more aggregate like compute sumaries of weather and run it in parallel.
 ---
 
 Thank you for taking the time to complete this exercise.
