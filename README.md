@@ -196,39 +196,261 @@ Use the sections below to document your work.
 
 ### Time Spent
 
-Approximate total time spent on the exercise.
+**Approximate total time spent on the exercise.**  
 Include any learning or research time if applicable.
+
+I spent approximately **3 hours** on initial research and designing the solution.
+
+After establishing the design, I reviewed GitHub repositories with similar implementations to understand best practices for operators and modular structure. I found [this repository](https://github.com/fahmizainal17/OpenWeatherMap_Data_Pipeline_Engineering_Project) particularly helpful due to its clear separation between business logic and DAG definitions. Besides, I've been learning about medallion architecture and I thought it would be a good approach for this case so I decided to learn more about it. I took this [article](https://medium.com/@junshan0/medallion-architecture-what-why-and-how-ce07421ef06f) as source of information.
+
+Once I had a clear approach, I began implementing the code using Python and SQL for the required queries. This phase took approximately **5 hours** of effective work.
+
+Finally, I spent around **1.5 hours** documenting the solution with clear step-by-step instructions. This work was spread across several days.
+
+**Total effective time: ~9.5 hours**
 
 ---
 
 ### Assumptions
 
-List any assumptions you made and how they influenced your design choices.
+**Data Source & API:**
+- OpenWeatherMap free tier API provides sufficient rate limits for hourly fetches across 8 cities.
+- API response structure remains stable; raw JSON storage enables reprocessing if schema changes. Assumption that the response from the API is consistent.
+- Current weather endpoint updates approximately every 10 minutes, making hourly fetches appropriate.
+
+**Pipeline Architecture:**
+- Batch processing model is sufficient: Fetcher runs first, then Transformer processes accumulated data.
+- Real-time streaming is not required; hourly batch updates meet analytics use cases.
+- Spark/distributed processing is unnecessary at this scale (~200 records/day); Postgres + SQL transformations are appropriate.
+- If scale increases significantly (100+ locations, real-time needs), would reconsider architecture.
+
+**Data Model:**
+- Raw data stored as JSONB for flexibility and schema evolution.
+- Transformed layer uses normalized tables (weather_observations, locations).
+- Denormalized analytics views (hourly_weather_summary) optimize common query patterns for downstream consumers
+- Metric units (Celsius, m/s, hPa, mm) and UTC timestamps enforced for consistency across all geographies
+
+**Infrastructure:**
+- Airflow `postgres_default` connection is properly configured
+- API key is stored in Airflow Variables (`Admin > Variables > OPENWEATHER_API_KEY`)
+
+**Data Quality:**
+- API returns valid, reasonable values — no extreme outlier filtering implemented. With more time, I will add a check for incorrect response or update for the response in the API.
 
 ---
 
 ### Tradeoffs & Design Decisions
 
-Describe key decisions you made and alternatives you considered.
+**Data Model Tradeoffs**
+
+- **Normalized vs. Denormalized Schema:**
+First, I considered that fully denormalizing the data could lead to data redundancy, harder maintenance, and difficult schema evolution. On the other hand, fully normalizing all data would cause complex JOINs for queries. Therefore, I decided on a hybrid approach: normalize locations into a separate dimension table, but keep weather measurements relatively flat for easy time-series analysis.
+
+- **Raw Data Storage Strategy:**
+One consumption requirement is that raw data should remain available. I considered two approaches: store raw JSON as-is, or parse immediately into structured columns. Both options have drawbacks—storing only raw JSON makes querying harder, while parsing immediately risks losing unanticipated fields if the API response changes. Therefore, I decided to store raw JSON in one table (bronze layer) and parsed data in another (silver layer), keeping the JSON as the source of truth.
+
+**Idempotency Tradeoffs**
+
+For idempotency, I chose an UPSERT approach because it prevents duplicates, ensures the latest data wins, and allows me to create a composite identifier based on location and timestamp. I considered alternatives:
+- **INSERT only:** Simple, but can create duplicates on re-runs.
+- **DELETE + INSERT:** Simple and consistent, but expensive for large datasets and loses historical audit trails.
+
+**Scalability**
+
+I started with a simple approach for 5–10 cities pre-loaded in the configuration file. If we scale to 100+ cities, I would consider batch processing, parallel API calls, and rate-limit awareness. For thousands of locations, async processing, bulk downloads, and careful API rate-limit management would become critical.
+
+**Data Transformation Tradeoffs**
+
+I decided to use a combination of Python and SQL. Python is easier to test and simplifies complex logic like parsing and validation. SQL is efficient for aggregations and keeps data processing in-database.
+
+**DAG Design**
+
+Initially, I considered using XCom in the fetcher DAG for parallel jobs and task segregation, but this introduces problems: XCom doesn't serialize datetimes well, has a 48KB size limit for transferring data between stages, and over-complicates the logic. For that reason, I simplified the fetcher to two steps: create tables, then fetch and store raw data.
+
+Additionally, I adopted a medallion architecture with distinct data layers: **Bronze** (raw), **Silver** (parsed/staged), and **Gold** (aggregated/mart).
+
+Here is a summary of my schema after the decisions:
+
+| Table | Purpose | Layer |
+|-------|---------|-------|
+| `dim_locations` | Normalized city/coordinate data | Dimension |
+| `raw_weather_api_responses` | Immutable raw JSON storage | Bronze/Raw |
+| `fact_weather_measurements` | Parsed, queryable measurements | Silver/Staged |
+| `agg_daily_weather` | Pre-aggregated daily stats | Gold/Mart |
+
+
+Workflow:
+
+```mermaid
+flowchart TB
+
+    %% =========================
+    %% CONSUMPTION LAYER
+    %% =========================
+    CL["**CONSUMPTION LAYER**<br/>
+    • BI Dashboards (daily trends)
+    • Queries
+    • Feature Extraction
+    • Scheduled reports"]
+
+    %% =========================
+    %% GOLD / SILVER TABLES
+    %% =========================
+    GOLD_AGG["**agg_daily_weather (Gold)**<br/>
+    • Daily MIN / MAX
+    • Daily averages
+    • Precip totals
+    • Dominant weather"]
+
+    SILVER_FACT["**fact_weather_measurements (Silver)**<br/>
+    • Parsed data
+    • Queryable
+    • Time-series"]
+
+    %% =========================
+    %% TRANSFORMER DAG
+    %% =========================
+    TRANSFORMER["**TRANSFORMER DAG**<br/>(transformer.py)"]
+
+    %% =========================
+    %% BRONZE + DIMENSIONS
+    %% =========================
+    BRONZE_RAW["**raw_weather_api_responses (Bronze)**"]
+
+    DIM_LOC["**dim_locations (Dimension)**"]
+
+    %% =========================
+    %% FETCHER DAG + API
+    %% =========================
+    FETCHER["**FETCHER DAG**<br/>(fetcher.py)"]
+
+    API["**OpenWeatherMap API**"]
+
+    %% =========================
+    %% FLOWS
+    %% =========================
+    CL --> GOLD_AGG
+    CL --> SILVER_FACT
+
+    GOLD_AGG --> TRANSFORMER
+    SILVER_FACT --> TRANSFORMER
+
+    TRANSFORMER --> SILVER_FACT
+
+    SILVER_FACT --> BRONZE_RAW
+    SILVER_FACT --> DIM_LOC
+
+    BRONZE_RAW --> FETCHER
+    FETCHER --> API
+```
 
 ---
 
 ### Next Steps / Improvements
 
-What would you implement next with more time?
-Examples:
+With more time, consider the next items:
 
-- Incremental loads
-- Schema evolution handling
-- Testing strategy
-- Observability / monitoring
-- Performance optimizations
+**Incrementals Loads**
+- Limit reloads to cities that have changed recently (if a change signal is available).
 
+**Schema evolution handling**
+- Adopt an “additive changes only” convention in the curated schema (add nullable columns with sensible defaults instead of dropping/renaming), and expose stable views for downstream consumers.
+
+**Testing strategy**
+- Unit-test `src/extract.py` using mocked HTTP responses (e.g., fixed JSON fixtures covering success, rate-limit, and error payloads).
+- Unit-test `src/load.py` and `src/queries.py` with an in-memory or test Postgres database spun up via docker-compose in CI.
+- Add integration tests that execute the full Airflow DAG against a local stack, asserting:
+     - Expected rows are written to bronze and silver tables.
+     - Idempotent re-runs do not create duplicate facts.
+   - Implement simple data-quality checks (e.g., non-null city_id, temperature within a plausible range, no future timestamps).
+
+**Observability / monitoring**
+- Configure Airflow SLAs and email/Slack alerts for DAG failures and SLA misses.
+- Add task-level logging that includes request IDs, city IDs, and row counts for each batch.
+- Expose basic health metrics (e.g., latest observation timestamp per city, total rows per day) via SQL queries.- Integrate with a monitoring stack (e.g., Graphana) by emitting metrics from tasks (duration, records processed, error counts).
+
+**Performance and operational optimizations**
+- Batch API calls where possible (e.g., group cities by geographic region or configuration) within rate limits to reduce total runtime.
+- Add appropriate indexes to the Postgres tables (e.g., on `city_id`, `observation_time`) and consider date-based partitioning for large time-series tables.
+- Tune Airflow concurrency and retry settings so transient API failures are retried without overwhelming the external service.
 ---
 
 ### Instructions to the Evaluator
 
-Provide any notes or guidance that would help someone reviewing or running your solution.
+Project Structure:
+
+SENIOR-DATA-ENGINEER-TAKEHOME-2026/
+├── dags/
+│   ├── __pycache__/
+│   ├── fetcher.py          # DAG definition (orchestration only)
+│   ├── transformer.py      # DAG definition (orchestration only)
+│   └── sql/                # SQL files
+│       └── schema.sql
+├── logs/
+├── plugins/
+├── src/                    # Business logic
+│   ├── __init__.py
+│   ├── extract.py          # API fetching logic
+│   ├── load.py             # Transforming data from the fetch logic
+│   ├── queries.py          # SQL queries functions
+│   └── config.py           # Configuration
+├── .gitignore
+├── docker-compose.yaml
+├── LICENSE
+└── README.md
+
+
+### Step 1: initialize the airflow db
+```bash
+docker-compose up airflow-init
+```
+
+### Step 2: initialize the services
+
+```bash
+docker-compose up -d
+```
+
+### Step 3: Set the API Key in Airflow
+
+1. Open Airflow UI: http://localhost:8080
+2. Login: `airflow` / `airflow`
+3. Go to **Admin > Variables**
+4. Click **+** to add new variable:
+   - **Key:** `OPENWEATHER_API_KEY`
+   - **Value:** `your_api_key_here`
+  ![alt text](images\airflow_postgree_connection.png)
+5. Save
+
+
+### Step 4: Set the postgree SQL connection in Airflow
+1. Open Airflow UI: http://localhost:8080
+2. Login: `airflow` / `airflow`
+3. Go to **Admin > Connections > Add new connection**
+4. Should look like the following records:
+![alt text](images\airflow_postgree_connection.png)
+5. Save
+
+
+### Running the DAGS
+
+**1. Fetcher : Crate the tables in postgree SQL and call the API from weather API and store it**
+1. Open Airflow UI: http://localhost:8080
+2. Login: `airflow` / `airflow`
+3. Look for the search Dags and type 'Fetcher'
+![alt text](images\airflow_postgree_fetcher.png)
+4. Click on fetcher and run in the play button.
+![alt text](images\airflow_fetcher_steps.png)
+By the way, should be two steps "Crate Tables" and "Fetch and Store Weather"
+
+**2. Transformer:**
+1. Open Airflow UI: http://localhost:8080
+2. Login: `airflow` / `airflow`
+3. Look for the search Dags and type 'Transformer'
+![alt text](images\airflow_DAGs_transformer.png)
+4. Click on transformer and run in the play button.
+![alt text](images\airflow_transformer_steps.png)
+There are steps: create derived tables, aggregate daily weather and then execute in parallel aggregate for weakly weather, compute location summary and validate the aggregate data.
 
 ---
 

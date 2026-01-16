@@ -1,44 +1,95 @@
+"""
+Transformer DAG - Weather Data Transformation Pipeline
+
+This DAG produces derived datasets from raw weather measurements for analytics and reporting.
+
+Tasks:
+    1. aggregate_daily_weather: Computes daily aggregates from fact_weather_measurements
+    2. validate_aggregates: Quality checks on derived data
+
+Use Cases:
+    - Daily weather summaries for dashboards
+    - Trend analysis (day-over-day changes)
+    - Historical analysis and reporting
+    - City-level comparisons
+
+Prerequisites:
+    - Fetcher DAG must run first to populate fact_weather_measurements
+"""
+
+import sys
+import logging
 from datetime import datetime, timedelta
 
-# The DAG object; we'll need this to instantiate a DAG
 from airflow import DAG
-
-# Operators; we need this to operate!
+from airflow.operators.python import PythonOperator
 from airflow.providers.postgres.operators.postgres import PostgresOperator
 
-# These args will get passed on to each operator
-# You can override them on a per-task basis during operator initialization
+# Add src to path
+sys.path.insert(0, "/opt/airflow/src")
+
+from config import POSTGRES_CONN_ID
+from queries import (
+    get_postgres_hook,
+    compute_daily_aggregates,
+    get_aggregation_sql,
+)
+
+logger = logging.getLogger(__name__)
+
 default_args = {
-    'owner': 'airflow',
-    'depends_on_past': False,
-    'email': ['airflow@example.com'],
-    'retries': 1,
-    'retry_delay': timedelta(minutes=5)
+    "owner": "airflow",
+    "depends_on_past": False,
+    "email": ["airflow@example.com"],
+    "email_on_failure": False,
+    "email_on_retry": False,
+    "retries": 1,
+    "retry_delay": timedelta(minutes=5),
 }
+
+def aggregate_daily_weather(**context):
+    """
+    Orchestrate daily weather aggregation.
+    
+    Uses queries.get_aggregation_sql to generate SQL and
+    queries.compute_daily_aggregates to execute it.
+    """
+    
+    sql = get_aggregation_sql(days_lookback=7)
+    
+    hook = get_postgres_hook()
+    rows_affected = compute_daily_aggregates(hook=hook, sql=sql)
+    
+    logger.info(f"Rows upserted: {rows_affected}")
+    return {
+        "status": "success",
+        "rows_upserted": rows_affected,
+    }
+
 with DAG(
-        'transformer',
-        default_args=default_args,
-        description='To transform the raw current weather to a modeled dataset',
-        schedule_interval=timedelta(minutes=5),
-        start_date=datetime(2021, 1, 1),
-        catchup=False,
-        tags=['take-home'],
+    dag_id="transformer",
+    default_args=default_args,
+    description="Transform raw weather data into derived datasets (daily, weekly aggregates and location summary) for analytics",
+    schedule_interval=timedelta(hours=1),
+    start_date=datetime(2024, 1, 1),
+    catchup=False,
+    tags=["weather", "transformation", "take-home"],
+    doc_md=__doc__,
 ) as dag:
-
-    # @TODO: Fill in the below
-    t1 = PostgresOperator(
-        task_id="create_modeled_dataset_table",
-        sql="""
-            CREATE TABLE IF NOT EXISTS current_weather (
-           );
-          """,
+    
+    # Task 1: Ensure derived tables exist using schema file
+    create_derived_tables = PostgresOperator(
+        task_id="create_derived_tables",
+        postgres_conn_id=POSTGRES_CONN_ID,
+        sql="sql/schema.sql",
     )
-
-    # @TODO: Fill in the below
-    t2 = PostgresOperator(
-        task_id="transform_raw_into_modelled",
-        sql="""
-            SELECT * FROM raw_current_weather ...
-          """,
+    
+    # Task 2: Compute daily aggregates from fact_weather_measurements and could be more aggregates in the future
+    aggregate_daily = PythonOperator(
+        task_id="aggregate_daily_weather",
+        python_callable=aggregate_daily_weather,
+        provide_context=True,
     )
-    t1 >> t2
+    
+    # Dependencies
+    create_derived_tables >> aggregate_daily
